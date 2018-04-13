@@ -1,0 +1,64 @@
+---
+title: "Comparing the Daily Schedules in the NHTS from 2009 and 2017"
+author: "Greg Macfarlane"
+date: "4/9/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+## Abstract
+
+
+```{r nhts2009}
+trips09 <- read_csv("nhts2009/nhts_day.csv.gz")
+
+
+t09 <- trips09 %>%
+  transmute(
+    year = 2009,
+    time = as.numeric(STRTTIME),
+    purpose = TRIPPURP,
+    weight = WTTRDFIN
+  )
+  
+```
+
+
+```{r nhts2017}
+trips17 <- read_csv("nhts2017/trippub.csv.gz")
+
+t17 <- trips17 %>%
+  transmute(
+    year = 2017,
+    time = as.numeric(STRTTIME),
+    purpose = TRIPPURP,
+    weight = WTTRDFIN
+  )
+```
+
+
+```{r}
+trips <- bind_rows(t17, t09) %>%
+  mutate(
+    period = case_when(
+      time < 700 ~ "Early AM",
+      time < 900 ~ "AM Peak",
+      time < 1600 ~ "Mid-day",
+      time < 1800 ~ "PM Peak",
+      time < 2400 ~ "Evening",
+      TRUE ~ "NA"
+    ),
+    period = factor(period, levels = c("Early AM", "AM Peak", "Mid-day", "PM Peak", "Evening"))
+  )
+```
+
+
+```{r tripsbar}
+ggplot(trips, aes(x = period, fill = factor(year), weight = weight)) +
+  geom_bar(position = "dodge")
+```
+
