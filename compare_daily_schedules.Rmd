@@ -10,55 +10,174 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 ```
 
-## Abstract
+# Abstract
+Travel modelers commonly use passive transportation data, such as cellular or
+GPS origin-destination matrices, to calibrate or validate their planning models,
+expanding and adjusting behavioral models estimated from a small-sample local
+household survey.  Recently, there has been interest in deriving synthetic
+records of individual travel directly from the passive data, with the support of
+other datasets. We previously developed a method (NCHRP IDEA Project 184) to
+build synthetic daily activity and travel patterns for a complete population. In
+this method, simulated individuals use the 2009 NHTS as a basis for tour
+patterns while passive origin-destination matrices spatially locate the
+simulated tours within an arbitrary region.
+
+For this presentation, we will update our tour database to the 2017 NHTS and
+comment on observed differences in the resulting simulated travel patterns.
+Specifically, we will consider the temporal distribution of weekday trips: the
+NHTS in 2009 and 2017 both show a higher proportion of mid-day, off-peak travel
+than other comparable local household surveys. We will examine the consequences
+of this for temporal activity patterns and in traffic assignment, and consider
+heterogeneity in distribution by city size, geographic region, and traveler
+attributes such as employment status and vehicle availability.
 
 
-```{r nhts2009}
-trips09 <- read_csv("nhts2009/nhts_day.csv.gz")
+# Introduction
+
+The National Household Travel Survey (NHTS) is the only national survey of all
+passenger trips by all modes and is collected on a periodic basis. The most
+recent two surveys were in 2009 and 2017. The data are useful for comparing
+travel trends across regions and across time, though the methodologies between
+successive survey collections can change somewhat. For instance, the 2009 survey
+was collected with a probability sample of landline telephone numbers and the
+2017 was collected with a sample of residential addresses. Additionally, there
+are a few questions that are different, though the general data collected and
+distributed in the public tables is similar. This invites comparison between the
+two surveys, as well as comparison between other studies of personal travel 
+behavior.
+
+One possibility is that the sampling methodologies of the NHTS bias the data
+towards older or homebound people who make more trips in the middle of the day
+than the general population which typically exhibits peaking behavior in the
+morning and evening at the start and end of the traditional workday.
 
 
-t09 <- trips09 %>%
-  transmute(
-    year = 2009,
-    time = as.numeric(STRTTIME),
-    purpose = TRIPPURP,
-    weight = WTTRDFIN
-  )
+```{r read_trips}
+source("R/clean_nhts_trips.R")
+trips09 <- read_csv("nhts2009/nhts_day.csv.gz") %>% clean_nhts_trips("2009")
+trips17 <- read_csv("nhts2017/trippub.csv.gz") %>% clean_nhts_trips("2017")
+```
+
+
+```{r trips}
+trips <- bind_rows(trips17, trips09) %>%
+  filter(!weekend)
+```
+
+The plot below shows the number of total (weighted) weekday trips by time period
+taken by all respondents in the 2009 and 2017 surveys. In both data sets,
+the mid-day trips (between 9:00 AM and 4:00 PM) make up almost 50 percent of
+all trips. This is a larger number than typically 
+
+```{r tripsbar}
+trips_bar <- trips %>%
+  group_by(period, year) %>% 
+  filter(start_time != -9) %>%
+  summarise(
+    trips = sum(weight)
+  ) %>%
+  group_by(year) %>%
+  mutate(
+    pct = trips / sum(trips) 
+  ) %>%
+  select(-trips)
+
+ggplot(trips_bar, aes(x = period, fill = factor(year), y = pct)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent)
+```
+
+This pattern holds when the data are segmented by the age of the traveler or by
+the size of the MSA.
+
+
+### Trips-in-Motion
+
+```{r small_tim}
+tim_small <- bind_rows(
+  read_csv("data/hickory_tod.csv", col_types = list(time = col_character())) %>%
+    mutate(dataset = "Hickory"),
+  read_csv("data/blacksburg_tod.csv", col_types = list(time = col_character())) %>%
+    mutate(dataset = "Blacksburg (NHTS Add-On)")
+) %>%
+  separate(time, c("hours", "minutes"), fill = "right") %>%
+  mutate(
+    minutes = ifelse(is.na(minutes), 0, minutes),
+    minutes = ifelse(minutes == 3, 30, minutes),
+    time = lubridate::ymd_hm(paste0("2018-01-01 ", hours, ":", minutes))
+  ) %>%
+  select(time, All = AllTrips, HBW = HBWTrips, dataset) %>%
+  gather(purpose, trips, All, HBW)
+
   
 ```
 
+```{r all_trips}
+tim_nhts <- build_trips_in_motion(trips)
 
-```{r nhts2017}
-trips17 <- read_csv("nhts2017/trippub.csv.gz")
-
-t17 <- trips17 %>%
-  transmute(
-    year = 2017,
-    time = as.numeric(STRTTIME),
-    purpose = TRIPPURP,
-    weight = WTTRDFIN
+tim_all_purposes <- tim_nhts %>%
+  group_by(dataset, time) %>%
+  summarise(
+    trips = sum(trips),
+    purpose = "All"
   )
+
+
+tim_nhts <- bind_rows(tim_nhts %>% filter(purpose == "HBW"), tim_all_purposes) %>%
+  ungroup() 
 ```
 
 
-```{r}
-trips <- bind_rows(t17, t09) %>%
+
+```{r tim_demand}
+tim_demand <- read_csv("data/savannah_demand.csv") %>%
+  build_tim_from_demand()%>%
+  mutate(dataset = "Simulated Demand")
+
+tim_all_demand <- tim_demand %>%
+  group_by(dataset, time) %>%
+  summarise(
+    trips = sum(trips),
+    purpose = "All"
+  )
+
+tim_demand <- bind_rows(tim_demand %>% filter(purpose == "HBW"), tim_all_demand) %>%
+  ungroup() 
+  
+```
+
+```{r tim_supply}
+tim_supply <- read_csv( "data/savannah_supply.csv" ) %>%
+  build_tim_from_supply() %>%
+  mutate(dataset = "Replanned Demand")
+
+
+tim_all_supply <- tim_supply %>%
+  group_by(dataset, time) %>%
+  summarise(
+    trips = sum(trips),
+    purpose = "All"
+  )
+
+tim_supply <- bind_rows(tim_supply %>% filter(purpose == "HBW"), tim_all_supply) %>%
+  ungroup() 
+```
+
+
+
+```{r trips_in_motion_plot}
+trips_in_motion <-  bind_rows(tim_small, tim_nhts) %>%
+  bind_rows(tim_demand) %>%
+  bind_rows(tim_supply) %>%
+  group_by(dataset, purpose) %>%
   mutate(
-    period = case_when(
-      time < 700 ~ "Early AM",
-      time < 900 ~ "AM Peak",
-      time < 1600 ~ "Mid-day",
-      time < 1800 ~ "PM Peak",
-      time < 2400 ~ "Evening",
-      TRUE ~ "NA"
-    ),
-    period = factor(period, levels = c("Early AM", "AM Peak", "Mid-day", "PM Peak", "Evening"))
+    trips = trips / sum(trips)
   )
-```
 
-
-```{r tripsbar}
-ggplot(trips, aes(x = period, fill = factor(year), weight = weight)) +
-  geom_bar(position = "dodge")
+ggplot(trips_in_motion, aes(x = time, y = trips, color = dataset)) +
+  geom_line() +
+  facet_wrap(~purpose) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_datetime(labels = scales::date_format("%H:%M"))
 ```
 

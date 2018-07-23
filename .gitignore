@@ -2,3 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+
+data/*
+nhts2009/*
+nhts2017/*
