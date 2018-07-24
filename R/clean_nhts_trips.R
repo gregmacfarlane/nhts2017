@@ -129,14 +129,15 @@ build_trips_in_motion <- function(trips, bin_size = 15) {
 }
 
 
-build_tim_from_demand <- function(demand) {
+build_tim_from_demand <- function(demand, bin_size = 15) {
   
   bins <- seq(0, 1439, bin_size)
   
   spread_demand <- demand %>%
     spread(time_type, time) %>%
     mutate(
-      end = ifelse(is.na(end), 1440, end)
+      end = ifelse(is.na(end), 1440, end),
+      start = ifelse(is.na(start), 0, start)
     ) %>%
     group_by(per_id) %>%
     arrange(start, .by_group =TRUE) %>%
@@ -173,7 +174,7 @@ build_tim_from_demand <- function(demand) {
 }
 
 
-build_tim_from_supply <- function(supply) {
+build_tim_from_supply <- function(supply, bin_size = 15) {
   
   bins <- seq(0, 1439, bin_size)
   
