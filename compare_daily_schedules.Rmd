@@ -1,12 +1,32 @@
 ---
 title: "Comparing the Daily Schedules in the NHTS from 2009 and 2017"
-author: "Greg Macfarlane"
+author: "Greg Macfarlane and Josie Kressner"
 date: "4/9/2018"
-output: html_document
+output: 
+  bookdown::pdf_document2:
+    toc: false
+references:
+- id: trbidea
+  title: Synthetic Household Travel Data Using Consumer and Mobile Phone Data
+  author:
+  - family: Kressner
+    given: Josephine
+  container-title: NCHRP IDEA Program
+  URL: http://www.trb.org/Main/Blurbs/176216.aspx
+  issue: 184
+  publisher: Transportation Research Board
+  issued: 
+    year: 2017
+    month: 3
+- id: nhts09
+  author:
+  - family: U.S. Department of Transportation
+  title: National Household Travel Survey
+  URL: https://nhts.ornl.gov
 ---
 
 ```{r setup, include=FALSE, cache = FALSE}
-knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+knitr::opts_chunk$set(echo = FALSE, cache = TRUE, message = FALSE, warning = FALSE)
 library(tidyverse)
 library(lubridate)
 ```
@@ -17,7 +37,7 @@ GPS origin-destination matrices, to calibrate or validate their planning models,
 expanding and adjusting behavioral models estimated from a small-sample local
 household survey.  Recently, there has been interest in deriving synthetic
 records of individual travel directly from the passive data, with the support of
-other datasets. We previously developed a method (NCHRP IDEA Project 184) to
+other datasets. @trbidea previously developed a method to
 build synthetic daily activity and travel patterns for a complete population. In
 this method, simulated individuals used the 2009 NHTS as a basis for tour
 patterns while passive and location-specific origin-destination matrices
@@ -44,7 +64,7 @@ cellular phone traces and highway counts are used to validate and calibrate the
 models, but are not useful in estimation because they do not contain information
 on the behavior and choices of individuals.
 
-The general National Household Travel Survey (NHTS) is not typically suitable
+The general National Household Travel Survey (NHTS)[@nhts09] is not typically suitable
 for a conventional travel modeling exercise, because the local sampling rate is
 too small and the geographic resolution is too large for model estimation or
 calibration (with some modifications, state or MPO-specific NHTS add-ons may be
@@ -87,10 +107,14 @@ the probability of archetype tours beginning each in each 90 minute period. An
 archetype tour is means of tour classification: a "simple work" tour archetype
 includes a single work activity, a "multi-part work" tour includes more than one
 activity, and a "composite" tour includes both work and non-work activities.
-The distribution of these probabilities by time of day are given in the plot
-below.
+The distribution of these probabilities by time of day are given in Figure
+\@ref(fig:schedules). From this plot, it appears that workers in the 2017 survey
+are somewhat less likely to make tours that involve a work activity, and 
+somewhat more respondents take multi-part work tours. There is also a less of a
+peak in the late afternoon in 2017. Overall however, the distributions are
+comparable.
 
-```{r schedules, fig.cap="Archetype tour probability for workers by time of day. The balance of the probability is the probability that no tour will start in the period."}
+```{r schedules, fig.cap="Probability of an archetype tour starting for workers by time of day.", dev = 'tikz', dev.args=list(pointsize=0.1)}
 schedules <- bind_rows(
   read_csv("data/02_2009_schedule_next_tour.csv") %>% mutate(year = 2009),
   read_csv("data/02_2017_schedule_next_tour.csv") %>% mutate(year = 2017)
@@ -98,20 +122,47 @@ schedules <- bind_rows(
   mutate(
     time = citycastr:::get_military_time(bin_start),
     time = lubridate::as_datetime(
-      stringr::str_c("2018-01-01 ", substr(time,1,2), ":", substr(time, 3, 4), ":00"))
-  )
+      stringr::str_c("2018-01-01 ", substr(time,1,2), ":", 
+                     substr(time, 3, 4), ":00")),
+    tour_type = gsub("Composite", "Mixed", tour_type),
+    tour_type = gsub("to and from", "to \\\\& from", tour_type)
+  ) %>%
+  filter(tour_type != "No tour") 
 
-ggplot(schedules %>% filter(tour_type != "No tour", worker), 
+ggplot(schedules %>% filter(worker), 
        aes(y = prob, x = time, fill = tour_type)) +
   geom_col() + 
   facet_wrap(~year) +
   xlab("Clock Time (24 hr)") + ylab("Tour Start Probability") +
-  scale_y_continuous(labels = scales::percent) +
-  scale_x_datetime(labels = scales::date_format("%H:%M"))
+  scale_fill_discrete(name = "") +
+  scale_y_continuous(labels = scales::percent_format(suffix = "\\%")) +
+  scale_x_datetime(labels = scales::date_format("%H:%M")) +
+  tfplotr::theme_tf()
 ```
 
-From this plot, it appears that workers in the 2017 survey are somewhat less
-likely to make tours that involve a work activity.
+
+```{r spread_schedules, fig.cap="Difference in archetype tour start probability between 2017 and 2009 NHTS for workers by time of day.", dev = 'tikz'}
+spread_schedules <-  schedules %>%
+  spread(year, prob, fill = 0) %>%
+  transmute(
+    worker, tour_type, time,
+    diff = `2017` - `2009`) 
+
+all_schedules <- spread_schedules %>%
+  group_by(worker, time) %>%
+  summarise(diff = sum(diff)) %>%
+  mutate(tour_type = "All tours")
+
+ggplot(bind_rows(spread_schedules, all_schedules) %>% filter(worker),
+       aes(y = diff, x = time)) +
+  geom_col() + 
+  facet_wrap(~tour_type) +
+  xlab("Clock Time (24 hr)") + ylab("Tour Start Probability") +
+  scale_y_continuous(labels = scales::percent_format(suffix = "\\%")) +
+  scale_x_datetime(labels = scales::date_format("%H:%M")) +
+  tfplotr::theme_tf()
+```
+
 
 That is, the largest increase in
 probabilities are for multi-part and simple work tours, and the decrease
@@ -160,11 +211,11 @@ We also obtained comparable distributions from two other data sources: a local
 household travel survey for the Hickory, North Carolina region and a 2009 NHTS
 add-on for the Blacksburg, Virginia region. Though these regions are both smaller
 than Asheville in terms of population, they share common elements in culture,
-geography, and infrastructure. The plot below shows the distribution of these
-trips-in-motion in each dataset. All the data show a pattern typical of daily
-travel: there are peaks in the AM and PM representing the beginning and end of
-the work day. The peaks are somewhat more pronounced in the Hickory survey but
-overall the four datasets are remarkably similar.
+geography, and infrastructure. Figure \@ref(fig:tim) shows the
+distribution of these trips-in-motion in each dataset. All the data show a
+pattern typical of daily travel: there are peaks in the AM and PM representing
+the beginning and end of the work day. The peaks are somewhat more pronounced in
+the Hickory survey but overall the four datasets are remarkably similar.
 
 
 ```{r small_tim}
@@ -186,7 +237,7 @@ tim_small <- bind_rows(
   
 ```
 
-```{r trips_in_motion_plot, fig.cap=""}
+```{r tim, fig.cap="Distribution of trips-in-motion for NHTS for medium-sized cities and comparison datasets.", dev = 'tikz'}
 trips_in_motion <-  bind_rows(tim_small, tim_nhts) %>%
   group_by(dataset, purpose) %>%
   mutate(
@@ -198,8 +249,9 @@ ggplot(trips_in_motion, aes(x = time, y = trips, color = dataset)) +
   scale_color_discrete(name = "Dataset") +
   facet_wrap(~purpose) +
   xlab("Local Time") + ylab("Percent of Daily Trips") +
-  scale_y_continuous(labels = scales::percent) +
-  scale_x_datetime(labels = scales::date_format("%H:%M"))
+  scale_y_continuous(labels = scales::percent_format(suffix = "\\%")) +
+  scale_x_datetime(labels = scales::date_format("%H:%M")) +
+  tfplotr::theme_tf()
 ```
 
 
@@ -211,36 +263,23 @@ in an attempt to iteratively improve the utility of each person's day. Travel
 time and cost is minimized, and time spent doing activities is maximized.
 
 
-```{r ash_demand, eval=FALSE}
+```{r ash_demand}
 ash17_demand <- read_csv("data/asheville_2017_demand.csv") 
 ash09_demand <- read_csv("data/asheville_2009_demand.csv") 
 ash17_assign <- read_csv("data/asheville_2017_supply.csv")
 ash09_assign <- read_csv("data/asheville_2009_supply.csv")
 ```
 
-We ran the data-driven model for a synthetic population in Asheville, North
-Carolina using the 2009 and 2017 NHTS as a schedules database. Because the 
-simulation for a city includes far more records than the NHTS responses, we 
-calculate the trips-in-motion for 60 minute periods instead of 15-minute
-periods.
+We ran the data-driven model to generate travel demand for a synthetic
+population in Asheville, North Carolina using the 2009 and 2017 NHTS as a
+schedules lookup database and subsequently ran the routing and replanning
+simulation. Figure \@ref(fig:tim-supply) shows the distribution of
+trips-in-motion in 15 minute bins.
 
-```{r nhts_60}
-tim_nhts_60 <- build_trips_in_motion(trips, bin_size = 60)
-tim_all_purposes_60 <- tim_nhts_60 %>%
-  group_by(dataset, time) %>%
-  summarise(
-    trips = sum(trips),
-    purpose = "All"
-  )
-tim_nhts_60 <- bind_rows(tim_nhts_60 %>% filter(purpose == "HBW"), tim_all_purposes_60) %>%
-  ungroup() 
-```
-
-
-```{r tim_ash_demand, eval = FALSE}
+```{r tim_ash_demand}
 tim_demand <- bind_rows(
-  build_tim_from_demand(ash17_demand, bin_size = 60) %>% mutate(dataset = "2017 Asheville"),
-  build_tim_from_demand(ash09_demand, bin_size = 60) %>% mutate(dataset = "2009 Asheville")
+  build_tim_from_demand(ash17_demand, bin_size = 15) %>% mutate(dataset = "2017 Asheville"),
+  build_tim_from_demand(ash09_demand, bin_size = 15) %>% mutate(dataset = "2009 Asheville")
 )
 
 tim_all_demand <- tim_demand %>%
@@ -255,7 +294,7 @@ tim_demand <- bind_rows(tim_demand %>% filter(purpose == "HBW"), tim_all_demand)
   
 ```
 
-```{r ash_supply, eval=FALSE}
+```{r ash_supply}
 tim_supply <- bind_rows(
   build_tim_from_supply(ash17_assign, bin_size = 15) %>% mutate(dataset = "2017 Asheville - Replanned"),
   build_tim_from_supply(ash09_assign, bin_size = 15) %>% mutate(dataset = "2009 Asheville - Replanned")
@@ -272,26 +311,53 @@ tim_supply <- bind_rows(tim_supply %>% filter(purpose == "HBW"), tim_all_supply)
   ungroup() 
 ```
 
-```{r tim_supply_plot, eval = FALSE}
-trips_in_motion <-  bind_rows(tim_nhts, tim_supply) %>%
+```{r tim-supply, fig.cap="Trips-in-motion for NHTS and simulated Asheville by time of day.", dev = "tikz"}
+trips_in_motion_supply <-  bind_rows(tim_nhts, tim_demand, tim_supply) %>%
   group_by(dataset, purpose) %>%
   mutate(
-    trips = trips / sum(trips)
+    trips = trips / sum(trips) 
   ) %>%
   separate(
     dataset, c("year", "dataset"), extra = "merge"
+  ) %>%
+  mutate(
+    dataset = ifelse(dataset == "Asheville", "Asheville - Demand", dataset)
   )
 
-ggplot(trips_in_motion, aes(x = time, y = trips, color = dataset)) +
+ggplot(trips_in_motion_supply, aes(x = time, y = trips, color = dataset)) +
   geom_line() +
   scale_color_discrete(name = "Dataset") +
-  facet_wrap(year~purpose) +
+  facet_grid(year~purpose) +
   xlab("Local Time") + ylab("Percent of Daily Trips") +
-  scale_y_continuous(labels = scales::percent) +
-  scale_x_datetime(labels = scales::date_format("%H:%M"))
+  scale_y_continuous(labels = scales::percent_format(suffix = "\\%")) +
+  scale_x_datetime(labels = scales::date_format("%H:%M")) +
+  tfplotr::theme_tf()
 ```
 
+The demand simulation initially generates a higher share of mid-day trips than 
+the NHTS source data, but the replanning simulation seems to re-peak the 
+distribution, particularly for work trips. Both the demand and replanning
+simulations seem to have a longer tail in the evening, with more trips still
+on the road than the NHTS data suggests. 
+
+It is worth noting that the NHTS data is considerably rougher than either
+simulated outcome; this both a function of the limited sample size of the NHTS
+(20,000 respondents versus 400,000 simulated agents) as well as the tendency for
+self-reporting diary respondents to round trip departures to nearest half-hours.
+
+
+## Conclusion
+
+The change from the 2009 to the 2017 dataset does not substantively affect
+the temporal distribution of tour start times by tour type, or the distribution
+of vehicle trips-in-motion for medium-sized cities. Applying a data-driven 
+generation process can smooth out the demand distribution and lead to more 
+natural travel patterns at microscopic scales necessary for demand assignment,
+but additional research is needed to match peaking behavior with more complete 
+fidelity.
 
 ### Acknowledgements
 We are grateful to Kyle Ward of WSP who provided trips-in-motion data for
 Hickory and Blacksburg.
+
+## References
